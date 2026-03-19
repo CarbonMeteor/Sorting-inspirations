@@ -117,12 +117,6 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','EB Garamo
 .set-empty span{font-size:12px;opacity:.7}
 .empty{text-align:center;padding:60px 20px;color:var(--dim);font-style:italic;font-size:15px;line-height:2}
 .empty .hint{font-size:12px;margin-top:8px;opacity:.6}
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(2px)}
-.modal{background:#1a1815;border:1px solid var(--border);border-radius:4px;padding:20px;width:480px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:12px}
-.modal h2{font-family:'EB Garamond',serif;font-size:16px;font-weight:500;color:var(--bright);letter-spacing:.08em}
-.modal textarea{flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);font-family:monospace;font-size:12px;padding:10px;resize:none;height:260px;outline:none;border-radius:2px;line-height:1.6}
-.modal textarea:focus{border-color:var(--dim)}
-.modal-acts{display:flex;gap:8px;justify-content:flex-end}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(50px);background:var(--card);border:1px solid var(--border);color:var(--text);padding:7px 18px;font-size:13px;border-radius:2px;transition:transform .2s ease;pointer-events:none;z-index:300;letter-spacing:.04em}
 .toast.show{transform:translateX(-50%) translateY(0)}
 </style>
@@ -132,7 +126,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','EB Garamo
   <h1>素 材 分 层</h1>
   <span class="cnt" id="cnt">尚未导入</span>
   <div class="hdr-r">
-    <button class="btn" onclick="showImportModal()">导入备份</button>
+    <button class="btn" onclick="importJSONFile()">导入备份</button>
     <button class="btn" onclick="exportJSON()">导出备份</button>
     <button class="btn" onclick="exportTxt()">导出文本</button>
     <button class="btn" onclick="clearAll()">清空</button>
@@ -150,8 +144,10 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','EB Garamo
 </div>
 <div class="content" id="content"></div>
 <div class="toast" id="toast"></div>
+<input type="file" id="jsonFileIn" accept=".json" style="display:none" onchange="handleJSONFile(this)">
 
 <script>
+const SK='sucai_v1';
 const CATS=[
   {n:'意象',c:'#c08840',d:'rgba(192,136,64,.12)'},
   {n:'台词',c:'#a03848',d:'rgba(160,56,72,.12)'},
@@ -168,26 +164,39 @@ let nid=1,tab=0,filt=-1,srchQ='',srchA='',editId=null,editSetId=null,activeSet=n
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+function save(){
+  try{localStorage.setItem(SK,JSON.stringify({items,sets,nid}));}catch(e){}
+}
+function load(){
+  try{
+    const raw=localStorage.getItem(SK);if(!raw)return;
+    const d=JSON.parse(raw);
+    items=d.items||[];sets=d.sets||[];nid=d.nid||1;
+    items.forEach(it=>{if(!it.cats)it.cats=[];});
+    sets.forEach(s=>{if(!s.itemIds)s.itemIds=[];});
+  }catch(e){}
+}
+
 function doImport(){
   const raw=$('impArea').value.trim();if(!raw)return;
   const lines=raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
   lines.forEach(t=>items.push({id:nid++,text:t,cats:[],archived:false}));
-  $('impArea').value='';render();toast(`导入 ${lines.length} 条`);
+  $('impArea').value='';save();render();toast(`导入 ${lines.length} 条`);
 }
 function archiveItem(id){
   const cats=[...(pending[id]||new Set())];if(!cats.length)return;
   const it=items.find(x=>x.id===id);
-  if(it){it.cats=cats;it.archived=true;delete pending[id];}render();
+  if(it){it.cats=cats;it.archived=true;delete pending[id];}save();render();
 }
 function deleteItem(id){
   items=items.filter(x=>x.id!==id);
   sets.forEach(s=>s.itemIds=s.itemIds.filter(x=>x!==id));
-  delete pending[id];if(editId===id)editId=null;render();
+  delete pending[id];if(editId===id)editId=null;save();render();
 }
 function saveItemEdit(id){
   const ta=$('eta_'+id);if(!ta)return;
   const it=items.find(x=>x.id===id);if(it)it.text=ta.value.trim()||it.text;
-  editId=null;render();
+  editId=null;save();render();
 }
 function toggleCat(id,i){
   if(!pending[id])pending[id]=new Set();
@@ -196,47 +205,49 @@ function toggleCat(id,i){
 function toggleEditCat(id,i){
   const it=items.find(x=>x.id===id);if(!it)return;
   const idx=it.cats.indexOf(i);idx>=0?it.cats.splice(idx,1):it.cats.push(i);
-  const el=$('ecats_'+id);
-  if(el)el.innerHTML=catBtnsEdit(id,it.cats);
+  const el=$('ecats_'+id);if(el)el.innerHTML=catBtnsEdit(id,it.cats);
+  save();
 }
 function doSearch(){srchA=srchQ;render()}
 function setFilt(n){filt=n;render()}
 function clearSrch(){srchQ='';srchA='';render()}
-function addToSet(sid,iid){const s=sets.find(x=>x.id===sid);if(s&&!s.itemIds.includes(iid))s.itemIds.push(iid)}
-function rmFromSet(sid,iid){const s=sets.find(x=>x.id===sid);if(s)s.itemIds=s.itemIds.filter(x=>x!==iid)}
-function deleteSet(id){sets=sets.filter(x=>x.id!==id);if(activeSet===id)activeSet=sets.length?sets[0].id:null}
-function createSet(name){name=name.trim();if(!name)return;const s={id:nid++,name,itemIds:[]};sets.push(s);activeSet=s.id}
-function renameSet(id,name){const s=sets.find(x=>x.id===id);if(s&&name.trim())s.name=name.trim()}
+function addToSet(sid,iid){const s=sets.find(x=>x.id===sid);if(s&&!s.itemIds.includes(iid)){s.itemIds.push(iid);save();}}
+function rmFromSet(sid,iid){const s=sets.find(x=>x.id===sid);if(s){s.itemIds=s.itemIds.filter(x=>x!==iid);save();}}
+function deleteSet(id){sets=sets.filter(x=>x.id!==id);if(activeSet===id)activeSet=sets.length?sets[0].id:null;save();}
+function createSet(name){name=name.trim();if(!name)return;const s={id:nid++,name,itemIds:[]};sets.push(s);activeSet=s.id;save();}
+function renameSet(id,name){const s=sets.find(x=>x.id===id);if(s&&name.trim()){s.name=name.trim();save();}}
 function doCreateSet(){const el=$('nsIn');if(!el)return;createSet(el.value);el.value='';render()}
 function doRename(id){const el=$('renIn');if(el)renameSet(id,el.value);editSetId=null;render()}
 
-function dlFile(content,filename,mime){
-  try{
-    const blob=new Blob([content],{type:mime});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;a.download=filename;
-    document.body.appendChild(a);a.click();
-    document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    return true;
-  }catch(e){
+function importJSONFile(){$('jsonFileIn').value='';$('jsonFileIn').click();}
+function handleJSONFile(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
     try{
-      const a=document.createElement('a');
-      a.href='data:'+mime+';charset=utf-8,'+encodeURIComponent(content);
-      a.download=filename;
-      document.body.appendChild(a);a.click();
-      document.body.removeChild(a);
-      return true;
-    }catch(e2){return false;}
-  }
+      const d=JSON.parse(e.target.result);
+      if(items.length>0&&!confirm(`导入将覆盖当前数据（${items.length} 条素材），确认吗？`))return;
+      items=d.items||[];sets=d.sets||[];
+      nid=d.nid||Math.max(1,...[...items,...sets].map(x=>x.id||0))+1;
+      items.forEach(it=>{if(!it.cats)it.cats=[];});
+      sets.forEach(s=>{if(!s.itemIds)s.itemIds=[];});
+      pending={};save();render();toast('备份导入成功');
+    }catch{toast('文件格式错误，请选择正确的备份 JSON');}
+  };
+  reader.readAsText(file);
 }
-
+function dlFile(content,filename,mime){
+  const blob=new Blob([content],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 function exportJSON(){
-  const content=JSON.stringify({items,sets,nid},null,2);
-  const ok=dlFile(content,'素材库备份.json','application/json');
-  if(!ok)showModal('导出备份 JSON（复制保存）','copy',content);
-  else toast('备份文件已下载');
+  dlFile(JSON.stringify({items,sets,nid},null,2),'素材库备份.json','application/json');
+  toast('备份文件已下载');
 }
 function exportTxt(){
   let out='';
@@ -252,45 +263,14 @@ function exportTxt(){
     if(!si.length)return;
     out+=`【档案集: ${s.name}】\n`;si.forEach(x=>out+=`  · ${x.text}\n`);out+='\n';
   });
-  const ok=dlFile(out,'素材库导出.txt','text/plain');
-  if(!ok)showModal('导出文本（复制保存）','copy',out);
-  else toast('文本文件已下载');
-}
-function showImportModal(){showModal('导入备份 JSON','import','');}
-function showModal(title,mode,content){
-  const div=document.createElement('div');div.className='modal-bg';div.id='mdl';
-  div.innerHTML=`<div class="modal">
-    <h2>${esc(title)}</h2>
-    <textarea id="mdlTa" ${mode==='copy'?'readonly':''}
-      placeholder="在此粘贴备份 JSON……">${esc(content)}</textarea>
-    <div class="modal-acts">
-      ${mode==='copy'?`<button class="save-btn" onclick="copyModal()">复制全部</button>`:''}
-      ${mode==='import'?`<button class="save-btn" onclick="importModal()">导入</button>`:''}
-      <button class="cncl-btn" onclick="closeModal()">关闭</button>
-    </div>
-  </div>`;
-  div.addEventListener('click',e=>{if(e.target===div)closeModal();});
-  document.body.appendChild(div);
-  if(mode==='copy'){const ta=$('mdlTa');ta.focus();ta.select();}
-}
-function closeModal(){const m=$('mdl');if(m)m.remove();}
-function copyModal(){
-  const ta=$('mdlTa');if(!ta)return;
-  navigator.clipboard.writeText(ta.value).then(()=>toast('已复制'));
-}
-function importModal(){
-  const ta=$('mdlTa');if(!ta)return;
-  try{
-    const d=JSON.parse(ta.value);
-    items=d.items||[];sets=d.sets||[];
-    nid=d.nid||Math.max(1,...items.map(x=>x.id),...sets.map(x=>x.id))+1;
-    pending={};closeModal();render();toast('备份导入成功');
-  }catch{toast('格式错误，请检查JSON');}
+  dlFile(out,'素材库导出.txt','text/plain');
+  toast('文本文件已下载');
 }
 function clearAll(){
   if(!items.length&&!sets.length)return;
-  if(confirm('清空所有素材和档案集？')){
-    items=[];sets=[];pending={};nid=1;srchQ='';srchA='';filt=-1;editId=null;activeSet=null;render();
+  if(confirm('清空所有素材和档案集？此操作不可恢复。')){
+    items=[];sets=[];pending={};nid=1;srchQ='';srchA='';filt=-1;editId=null;activeSet=null;
+    save();render();
   }
 }
 
@@ -306,7 +286,8 @@ function tags(cats){
   return cats.map(i=>`<span class="tag" style="color:${CATS[i].c};border-color:${CATS[i].c}40">${CATS[i].n}</span>`).join('');
 }
 
-function render(){updateMeta();
+function render(){
+  updateMeta();
   if(tab===0)renderUnsorted();
   else if(tab===1)renderArchive();
   else renderSets();
@@ -318,7 +299,6 @@ function updateMeta(){
   $('bg0').textContent=items.filter(x=>!x.archived).length;
   $('bg1').textContent=arch;$('bg2').textContent=sets.length;
 }
-
 function renderUnsorted(){
   const un=items.filter(x=>!x.archived);
   if(!un.length){
@@ -341,7 +321,6 @@ function renderUnsorted(){
   });
   $('content').innerHTML='';$('content').appendChild(g);
 }
-
 function renderArchive(){
   let fil=items.filter(x=>x.archived);
   if(filt>=0)fil=fil.filter(x=>x.cats.includes(filt));
@@ -396,7 +375,6 @@ function renderArchive(){
     list.appendChild(row);
   });
 }
-
 function renderPop(iid){
   if(!sets.length)return`<div class="popover"><div class="pop-empty">还没有档案集<br><span>在「档案集」标签创建</span></div></div>`;
   return`<div class="popover" onclick="event.stopPropagation()">
@@ -407,7 +385,6 @@ function renderPop(iid){
   </div>`;
 }
 function togglePop(id,e){e.stopPropagation();popItem=popItem===id?null:id;render();}
-
 function renderSets(){
   const wrap=document.createElement('div');wrap.className='sets-layout';
   const sb=document.createElement('div');sb.className='sets-sb';
@@ -455,7 +432,6 @@ function renderSets(){
   wrap.appendChild(sb);wrap.appendChild(det);
   $('content').innerHTML='';$('content').appendChild(wrap);
 }
-
 function swTab(n){
   tab=n;popItem=null;if(n!==1)editId=null;
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===n));
@@ -466,6 +442,8 @@ function toast(msg){
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2000);
 }
 document.addEventListener('click',()=>{if(popItem!==null){popItem=null;render();}});
+
+load();
 render();
 </script>
 </body>
